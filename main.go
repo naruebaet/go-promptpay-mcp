@@ -7,14 +7,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/naruebaet/go-promptpay/pp"
+	"github.com/naruebaet/go-promptpay-mcp/promptpay"
+	"github.com/naruebaet/go-promptpay-mcp/types"
 )
-
-type GeneratePromptPayRequest struct {
-	AccountType   pp.AccountType `json:"accountType"`
-	AccountNumber string         `json:"accountNumber"`
-	Amount        *float64       `json:"amount,omitempty"`
-}
 
 func main() {
 	// Initialize MCP server
@@ -26,21 +21,22 @@ func main() {
 
 	tool := mcp.NewTool(
 		"generate_promptpay_code",
-		mcp.WithDescription("Generate PromptPay QR Code no amount"),
+		mcp.WithDescription("Generate PromptPay QR Code for payment via phone number or Thai ID, with optional amount"),
 		mcp.WithString("accountType",
 			mcp.Required(),
-			mcp.Description("Type of account for PromptPay (phone or ID)"),
+			mcp.Description("Account type: 'phone' for phone numbers, 'id' for Thai ID"),
 		),
 		mcp.WithString("accountNumber",
 			mcp.Required(),
-			mcp.Description("Account number for PromptPay (phone number or Thai ID)"),
+			mcp.Description("Phone number (e.g., 0812345678) or Thai ID (13 digits)"),
 		),
 		mcp.WithNumber("amount",
-			mcp.Description("Amount for PromptPay QR Code (optional)"),
+			mcp.Description("Payment amount in THB (optional)"),
 		),
 	)
 
-	s.AddTool(tool, generatePromptPayCode)
+	ppService := promptpay.NewService()
+	s.AddTool(tool, makeGeneratePromptPayHandler(ppService))
 
 	// Start the MCP server
 	if err := server.ServeStdio(s); err != nil {
@@ -48,25 +44,18 @@ func main() {
 	}
 }
 
-func generatePromptPayCode(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var req GeneratePromptPayRequest
+func makeGeneratePromptPayHandler(service *promptpay.Service) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var req types.GeneratePromptPayRequest
+		if err := request.BindArguments(&req); err != nil {
+			return nil, fmt.Errorf("invalid request: %w", err)
+		}
 
-	err := request.BindArguments(&req)
-	if err != nil {
-		return nil, err
+		qrCode, err := service.GenerateQRCode(req.AccountType, req.AccountNumber, req.Amount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate QR code: %w", err)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Here is qr code payload : %s", qrCode)), nil
 	}
-
-	// Generate PromptPay QR code payload
-	var qrCode string
-	if req.Amount != nil {
-		qrCode, err = pp.GenPromptpayWithAmount(req.AccountType, req.AccountNumber, *req.Amount)
-	} else {
-		qrCode, err = pp.GenPromptpay(req.AccountType, req.AccountNumber)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return mcp.NewToolResultText(fmt.Sprintf("Here is qr code payload : %s", qrCode)), nil
 }
